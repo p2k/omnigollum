@@ -46,6 +46,13 @@ Precious::App.set(:environment, :production)
 require 'omnigollum'
 require 'omniauth-ldap'
 
+# Create custom user class (here we just override the default)
+class MyUser < Omnigollum::Models::OmniauthUser
+  def author
+    @name
+  end
+end
+
 options = {
   # OmniAuth::Builder block is passed as a proc
   :providers => Proc.new do
@@ -61,10 +68,8 @@ options = {
   :dummy_auth => false,
   # Make the entire wiki private
   :protected_routes => ['/*'],
-  # Specify committer name as just the user name
-  :author_format => Proc.new { |user| user.name },
-  # Specify committer e-mail as just the user e-mail
-  :author_email => Proc.new { |user| user.email }
+  # Specify custom user class
+  :user_class => MyUser
 }
 
 # :omnigollum options *must* be set before the Omnigollum extension is registered

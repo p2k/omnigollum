@@ -9,30 +9,55 @@ module Omnigollum
     class OmniauthUserInitError < StandardError; end
 
     class User
-      attr_reader :uid, :name, :email, :nickname, :provider
-    end
+      attr_reader :uid, :name, :nickname, :author, :email, :provider
 
-    class OmniauthUser < User
       def initialize (hash, options)
         # Validity checks, don't trust providers
         @uid = hash['uid'].to_s.strip
         raise OmniauthUserInitError, "Insufficient data from authentication provider, uid not provided or empty" if @uid.empty?
 
-        @name = hash['info']['name'].to_s.strip if hash['info'].has_key?('name')
-        @name = options[:default_name] if !@name || @name.empty?
-
+        @name = hash['name'].to_s.strip
         raise OmniauthUserInitError, "Insufficient data from authentication provider, name not provided or empty" if !@name || @name.empty?
 
-        @email = hash['info']['email'].to_s.strip if hash['info'].has_key?('email')
-        @email = options[:default_email] if !@email || @email.empty?
+        @author = hash['author'].to_s.strip
+        raise OmniauthUserInitError, "Insufficient data from authentication provider, author not provided or empty" if !@author || @author.empty?
 
+        @email = hash['email'].to_s.strip
         raise OmniauthUserInitError, "Insufficient data from authentication provider, email not provided or empty" if !@email || @email.empty?
 
-        @nickname = hash['info']['nickname'].to_s.strip if hash['info'].has_key?('nickname')
+        @nickname = hash['nickname'].to_s.strip if !hash['nickname'].nil?
 
         @provider = hash['provider']
 
         self
+      end
+
+      def can_access? (route)
+        true
+      end
+    end
+
+    class OmniauthUser < User
+      def initialize (hash, options)
+        name = hash['info'].has_key?('name') ? hash['info']['name'] : options[:default_name]
+        nickname = hash['info'].has_key?('nickname') ? hash['info']['nickname'] : nil
+        email = hash['info'].has_key?('email') ? hash['info']['email'] : options[:default_email]
+
+        case (authorized_users = options[:authorized_users])
+        when Regexp
+          raise OmniauthUserInitError, "User was not found in the authorized users list" unless (email =~ authorized_users)
+        when Array
+          raise OmniauthUserInitError, "User was not found in the authorized users list" unless authorized_users.include?(email) || authorized_users.include?(nickname)
+        end
+
+        super({
+          uid: hash['uid'],
+          name: name,
+          author: nickname ? "#{name} (#{nickname})" : name,
+          email: email,
+          nickname: nickname,
+          provider: hash['provider'],
+        }, options)
       end
     end
   end
@@ -97,7 +122,8 @@ module Omnigollum
       end
     end
 
-    def show_error
+    def show_error (can_retry = true)
+      @can_retry = can_retry
       options = settings.send(:omnigollum)
       auth_config
       require options[:path_views] + '/error'
@@ -107,9 +133,9 @@ module Omnigollum
     def commit_message
       if user_authed?
         user = get_user
-        return { :message => params[:message], :name => user.name, :email => user.email}
+        return { :message => params[:message], :name => user.name, :email => user.email }
       else
-        return { :message => params[:message]}
+        return { :message => params[:message] }
       end
     end
   end
@@ -149,8 +175,7 @@ module Omnigollum
       :default_email  => nil,
       :provider_names => [],
       :authorized_users => [],
-      :author_format => Proc.new { |user| user.nickname ? user.name + ' (' + user.nickname + ')' : user.name },
-      :author_email => Proc.new { |user| user.email }
+      :user_class => Omnigollum::Models::OmniauthUser,
     }
 
     def initialize
@@ -255,31 +280,14 @@ module Omnigollum
       app.before options[:route_prefix] + '/auth/:name/callback' do
         begin
           if !request.env['omniauth.auth'].nil?
-            user = Omnigollum::Models::OmniauthUser.new(request.env['omniauth.auth'], options)
-
-            case (authorized_users = options[:authorized_users])
-            when Regexp
-              user_authorized = (user.email =~ authorized_users)
-            when Array
-              user_authorized = authorized_users.include?(user.email) || authorized_users.include?(user.nickname)
-            else
-              user_authorized = true
-            end
-
-            # Check authorized users
-            if !user_authorized
-              @title   = 'Authorization failed'
-              @subtext = 'User was not found in the authorized users list'
-              @auth_params = "?origin=#{CGI.escape(request.env['omniauth.origin'])}" unless request.env['omniauth.origin'].nil?
-              show_error
-            end
+            user = options[:user_class].new(request.env['omniauth.auth'], options)
 
             session[:omniauth_user] = user
 
             # Update gollum's author hash, so commits are recorded correctly
             session['gollum.author'] = {
-              :name => options[:author_format].call(user),
-              :email => options[:author_email].call(user)
+              :name => user.author,
+              :email => user.email
             }
 
             redirect request.env['omniauth.origin']
@@ -308,7 +316,19 @@ module Omnigollum
       end
 
       # Pre-empt protected routes
-      options[:protected_routes].each {|route| app.before(route) {user_auth unless user_authed?}}
+      options[:protected_routes].each { |route|
+        app.before route do
+          if user_authed?
+            if !get_user.can_access?(route)
+              @title   = 'Forbidden'
+              @subtext = 'You have no permission to access this page'
+              show_error false
+            end
+          else
+            user_auth
+          end
+        end
+      }
 
       # Write the actual config back to the app instance
       app.set(:omnigollum, options)
