@@ -13,21 +13,21 @@ module Omnigollum
 
       def initialize (hash, options)
         # Validity checks, don't trust providers
-        @uid = hash['uid'].to_s.strip
+        @uid = hash[:uid].to_s.strip
         raise OmniauthUserInitError, "Insufficient data from authentication provider, uid not provided or empty" if @uid.empty?
 
-        @name = hash['name'].to_s.strip
-        raise OmniauthUserInitError, "Insufficient data from authentication provider, name not provided or empty" if !@name || @name.empty?
+        @name = hash[:name].to_s.strip
+        raise OmniauthUserInitError, "Insufficient data from authentication provider, name not provided or empty" if @name.empty?
 
-        @author = hash['author'].to_s.strip
-        raise OmniauthUserInitError, "Insufficient data from authentication provider, author not provided or empty" if !@author || @author.empty?
+        @author = hash[:author].to_s.strip
+        raise OmniauthUserInitError, "Insufficient data from authentication provider, author not provided or empty" if @author.empty?
 
-        @email = hash['email'].to_s.strip
-        raise OmniauthUserInitError, "Insufficient data from authentication provider, email not provided or empty" if !@email || @email.empty?
+        @email = hash[:email].to_s.strip
+        raise OmniauthUserInitError, "Insufficient data from authentication provider, email not provided or empty" if @email.empty?
 
-        @nickname = hash['nickname'].to_s.strip if !hash['nickname'].nil?
+        @nickname = hash[:nickname].to_s.strip if !hash[:nickname].nil?
 
-        @provider = hash['provider']
+        @provider = hash[:provider]
 
         self
       end
